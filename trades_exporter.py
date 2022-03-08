@@ -1,66 +1,72 @@
 import requests
 from os import path, mkdir
 
-req = requests.get(
-    'https://community-api.coinmetrics.io/v4/timeseries/market-trades?&markets=coinbase-*-usd-spot,coinbase-*-usdt-spot,binance-*-usd-spot,binance-*-usdt-spot&page_size=500&pretty=true&start_time=2022-02-21T00:00:00Z&end_time=2022-02-21T00:00:05Z').json()
+exchanges = [
+    'binance',
+    'coinbase'
+]
+
+quoted_assets = [
+    'usd',
+    'usdt'
+]
+
+market_type = 'spot'
+
+begin_timestamp = '2022-03-04'
+end_timestamp = '2022-03-05'
 
 
-def iterate_through_data(response):
-
-    trades_data = response['data']
-
-    for data in trades_data:
-        market = data['market']
-        exchange = data['market'].split('-')[0]
+def create_folders(data, exchange, market):
+    for trades in trades_data['data']:
         if path.isdir(exchange):
-            # in case an exchange directory is manually created
-            if path.isdir(f"{exchange}/{market}"):
-                convert_to_CSV(data)
+            if path.isdir(f'{exchange}/{market}'):
+                pass
             else:
                 mkdir(path.join(exchange, market))
-                convert_to_CSV(data)
         else:
             mkdir(exchange)
             mkdir(path.join(exchange, market))
-            convert_to_CSV(data)
 
-    if 'next_page_url' in response:
-        global page_num
-        page_num += 1
-        next_page_url = requests.get(response['next_page_url']).json()
-        print(f"Moving to page {page_num}")
-        iterate_through_data(next_page_url)
+        csv_path = f'{exchange}/{market}/{begin_timestamp}.csv'
+        csv_column = (','.join(list(trades.keys())))
+        csv_data = (','.join(list(trades.values())))
+
+        collect_data(csv_path, csv_column, csv_data)
 
 
-def convert_to_CSV(data):
-
-    market = data['market']
-    exchange = data['market'].split('-')[0]
-    time = data['time']
-    coin_metrics_id = data['coin_metrics_id']
-    amount = data['amount']
-    price = data['price']
-    database_time = data['database_time']
-    side = data['side']
-
-    csv_filename = time.split(":")[0][:10]
-    csv_path = f"{exchange}/{market}/{csv_filename}.csv"
-    csv_columns = "Market, Time, Coin Metrics ID, Amount, Price, Database Time, Side\n"
-    csv_data = f"{market}, {time}, {coin_metrics_id}, {amount}, {price}, {database_time}, {side}\n"
-
+def collect_data(csv_path, column, data):
     if path.exists(csv_path):
-        with open(csv_path, "r+") as csv_file:
-            if csv_data not in csv_file:
-                csv_file.write(csv_data)
-                csv_file.close()
+        with open(csv_path, 'r+') as csv_file:
+            if data not in csv_file:
+                csv_file.write(f'{data}\n')
     else:
-        with open(csv_path, "w") as csv_file:
-            csv_file.write(csv_columns)
-            csv_file.write(csv_data)
-            csv_file.close()
+        with open(csv_path, 'w') as csv_file:
+            csv_file.write(f'{column}\n')
+            csv_file.write(f'{data}\n')
 
 
-page_num = 1
-iterate_through_data(req)
+for exchange in exchanges:
+    for quote in quoted_assets:
+        specific_markets = requests.get(
+            f'https://community-api.coinmetrics.io/v4/catalog-all/markets?&exchange={exchange}&quote={quote}&type={market_type}&include=trades').json()
+        if specific_markets['data']:
+            for markets in specific_markets['data']:
+                market = markets['market']
+                trades_data = requests.get(
+                    f'https://community-api.coinmetrics.io/v4/timeseries/market-trades?&markets={market}&page_size=1&pretty=true&start_time={begin_timestamp}&end_time={end_timestamp}').json()
+                if trades_data['data']:
+                    data = trades_data['data']
+                    print(f'Collecting data for: {market}')
+                    create_folders(data, exchange, market)
+                next_page = 1
+                while 'next_page_url' in trades_data:
+                    next_page_url = requests.get(
+                        trades_data['next_page_url']).json()
+                    next_page_of_data = next_page_url['data']
+                    next_page += 1
+                    print(f'Page {next_page}: {market}')
+                    create_folders(next_page_of_data, exchange, market)
+                    trades_data = next_page_url
 
-print("Iteration complete")
+print('\nIteration complete')
